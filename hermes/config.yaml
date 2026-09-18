@@ -87,8 +87,8 @@ dashboard:
   theme: mono
   basic_auth:
     username: MihirPanpatil
-    password_hash: scrypt$16384$8$1$NwkcqWEWvKT21mNA2RheFw==$xYToZEU8IZ8nT+wnXCeC0Tm23n7Ac6xVtncSFQL1x9g=
-    secret: 8TVQDgyemzjLJkStayIu7mrBwjFsFpmNAUJuS7EBUlE
+    password_hash: ${REDACTED_SECRET}
+    secret: ${REDACTED_SECRET}
 stt:
   enabled: true
   language: en
@@ -13452,7 +13452,7 @@ mcp_servers:
     connect_timeout: 30.0
     oauth:
       client_id: RDFWLQF7A6-100
-      client_secret: AN9S03DRGT
+      client_secret: ${REDACTED_SECRET}
   fyers-local:
     command: /home/openclaw/.local/bin/fyers-mcp-server-hermes
     connect_timeout: 30.0
