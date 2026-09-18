@@ -13476,6 +13476,24 @@ mcp_servers:
         -m angel_one_mcp.server
     timeout: 120
     connect_timeout: 60
+    tools:
+      include:
+        - get_profile
+        - get_holdings
+        - get_all_holdings
+        - get_positions
+        - get_rms_limit
+        - get_order_book
+        - get_trade_book
+        - get_ltp_data
+        - get_market_data
+        - get_candle_data
+        - search_scrip
+        - get_gtt_list
+        - get_option_greek
+        - get_gainers_losers
+        - get_put_call_ratio
+        - estimate_charges
   exchange_rss:
     command: /home/openclaw/angel-one-mcp-venv/bin/python
     args:

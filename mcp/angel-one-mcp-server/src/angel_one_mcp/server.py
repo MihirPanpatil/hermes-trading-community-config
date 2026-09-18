@@ -33,6 +33,7 @@ mcp = FastMCP("angel-one-trading")
 smart_api: Optional[SmartConnect] = None
 is_authenticated = False
 current_refresh_token: Optional[str] = None
+_auth_lock = asyncio.Lock()
 
 # SmartAPI market-data controls: serialize calls, cache repeated reads, and
 # stay comfortably below the published quote/LTP limits.
@@ -76,7 +77,8 @@ TOTP_SECRET = os.getenv("ANGEL_ONE_TOTP_SECRET")
 
 # Safety configurations
 MAX_ORDER_QUANTITY = int(os.getenv("MAX_ORDER_QUANTITY", "10000"))
-DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "false").lower() == "true"
+# Fail closed: real-money actions stay disabled unless explicitly enabled.
+DRY_RUN_MODE = os.getenv("DRY_RUN_MODE", "true").strip().lower() == "true"
 
 def validate_environment():
     """Validate required environment variables"""
@@ -87,50 +89,40 @@ def validate_environment():
         raise ValueError(f"Missing required environment variables: {missing_vars}")
 
 async def ensure_authenticated():
-    """Ensure the API client is authenticated"""
+    """Ensure the API client is authenticated, re-authenticating after expiry."""
     global smart_api, is_authenticated, current_refresh_token
-    
-    if smart_api is None:
-        validate_environment()
-        smart_api = SmartConnect(api_key=API_KEY)
-    
-    if not is_authenticated:
+
+    async with _auth_lock:
+        if smart_api is None:
+            validate_environment()
+            smart_api = SmartConnect(api_key=API_KEY)
+
+        if is_authenticated:
+            return True
+
         try:
-            # Generate TOTP
             totp = pyotp.TOTP(TOTP_SECRET).now()
-            
-            # Generate session
             data = smart_api.generateSession(CLIENT_CODE, PASSWORD, totp)
-            
-            if data['status']:
-                auth_token = data['data']['jwtToken']
-                refresh_token = data['data']['refreshToken']
-                smart_api.getfeedToken()
-                
-                # Remove 'Bearer ' prefix if present - Angel One API expects raw JWT
-                if auth_token.startswith('Bearer '):
-                    auth_token = auth_token[7:]
-                    
-                smart_api.setAccessToken(auth_token)
-                smart_api.setRefreshToken(refresh_token)
-                
-                # Store refresh token globally for profile access
-                current_refresh_token = refresh_token
-                
-                is_authenticated = True
-                logger.info("Successfully authenticated with Angel One API")
-                return True
-            else:
-                error_msg = f"Authentication failed: {data.get('message', 'Unknown error')}"
-                logger.error(error_msg)
-                raise Exception(error_msg)
-                
+            if not data.get("status"):
+                raise Exception(f"Authentication failed: {data.get('message', 'Unknown error')}")
+
+            auth_token = data["data"]["jwtToken"]
+            refresh_token = data["data"]["refreshToken"]
+            smart_api.getfeedToken()
+            if auth_token.startswith("Bearer "):
+                auth_token = auth_token[7:]
+            smart_api.setAccessToken(auth_token)
+            smart_api.setRefreshToken(refresh_token)
+            current_refresh_token = refresh_token
+            is_authenticated = True
+            logger.info("Successfully authenticated with Angel One API")
+            return True
         except Exception as e:
-            error_msg = f"Authentication error: {str(e)}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-    
-    return True
+            is_authenticated = False
+            current_refresh_token = None
+            logger.error("Angel One authentication failed: %s", e)
+            raise
+
 
 def handle_api_error(func_name: str, error: Exception) -> Dict[str, Any]:
     """Handle and format API errors with context"""
@@ -141,7 +133,14 @@ def handle_api_error(func_name: str, error: Exception) -> Dict[str, Any]:
         "suggestion": "Check parameters and try again. Verify market hours for trading operations."
     }
     
-    logger.error(f"API Error in {func_name}: {error}")
+    error_text = str(error).lower()
+    if any(marker in error_text for marker in ("invalid token", "token expired", "session expired", "unauthorized", "jwt")):
+        global is_authenticated, current_refresh_token
+        is_authenticated = False
+        current_refresh_token = None
+        logger.warning("Angel One session appears expired; next request will re-authenticate")
+
+    logger.error("API Error in %s: %s", func_name, error)
     return {"error": error_context}
 
 # =============================================================================
